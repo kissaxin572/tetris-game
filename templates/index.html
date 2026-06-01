@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>俄罗斯方块 — Tetris</title>
+    <style>
+        /* ============================================================
+           CSS 变量 & 全局
+           ============================================================ */
+        :root {
+            --bg-deep: #06060f;
+            --panel-bg: rgba(14, 14, 36, 0.88);
+            --border: rgba(90, 90, 180, 0.2);
+            --border-hover: rgba(120, 120, 220, 0.4);
+            --text: #d0d0ee;
+            --text-dim: #7070a0;
+            --cyan:    #00e5ff;
+            --purple:  #b44dff;
+            --pink:    #ff3d7c;
+            --gold:    #ffc400;
+            --green:   #00e676;
+            --red:     #ff1744;
+            --blue:    #448aff;
+            --orange:  #ff9100;
+            --grid-line: rgba(255,255,255,0.025);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg-deep);
+            background-image:
+                radial-gradient(ellipse at 25% 15%, rgba(0,229,255,0.05) 0%, transparent 55%),
+                radial-gradient(ellipse at 75% 75%, rgba(180,77,255,0.05) 0%, transparent 55%),
+                radial-gradient(ellipse at 50% 50%, rgba(255,61,124,0.02) 0%, transparent 65%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            color: var(--text);
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* ---- 背景星星 ---- */
+        .stars { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+        .star {
+            position: absolute; background: white; border-radius: 50%;
+            animation: twinkle var(--d) ease-in-out infinite;
+            animation-delay: var(--delay); opacity: 0;
+        }
+        @keyframes twinkle {
+            0%,100% { opacity: 0.08; transform: scale(1); }
+            50%     { opacity: 0.7;  transform: scale(1.6); }
+        }
+
+        /* ============================================================
+           主布局
+           ============================================================ */
+        .game-wrapper {
+            position: relative; z-index: 1;
+            display: flex; gap: 28px; align-items: stretch; padding: 20px;
+        }
+
+        /* ---- 游戏板容器 (玻璃拟态) ---- */
+        .board-outer {
+            position: relative;
+            background: var(--panel-bg);
+            border-radius: 22px; padding: 18px;
+            border: 1px solid var(--border);
+            box-shadow:
+                0 0 60px rgba(90,90,180,0.07),
+                0 0 120px rgba(90,90,180,0.03),
+                inset 0 1px 0 rgba(255,255,255,0.02);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+        .board-inner {
+            position: relative; border-radius: 10px; overflow: hidden;
+            box-shadow: 0 0 40px rgba(0,229,255,0.06), inset 0 0 30px rgba(0,0,0,0.5);
+        }
+        canvas#gameCanvas {
+            display: block;
+            background: rgba(0,0,0,0.55);
+            image-rendering: crisp-edges;
+        }
+
+        /* ---- 游戏结束遮罩 ---- */
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.78); border-radius: 10px;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.5s ease; z-index: 10;
+        }
+        .overlay.active { opacity: 1; pointer-events: all; }
+        .overlay-title {
+            font-size: 38px; font-weight: 900; letter-spacing: 3px;
+            background: linear-gradient(135deg, var(--pink), var(--purple));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+        .overlay-score { font-size: 20px; color: var(--text-dim); margin-bottom: 28px; }
+        .overlay-score span { color: var(--gold); font-weight: 700; font-size: 30px; }
+        .btn-restart {
+            padding: 12px 40px; font-size: 16px; font-weight: 700; border: none;
+            border-radius: 30px; cursor: pointer;
+            background: linear-gradient(135deg, var(--cyan), var(--purple));
+            color: #fff; letter-spacing: 1px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 22px rgba(180,77,255,0.35); outline: none;
+        }
+        .btn-restart:hover { transform: translateY(-2px); box-shadow: 0 6px 32px rgba(180,77,255,0.55); }
+        .btn-restart:active { transform: translateY(0);   box-shadow: 0 2px 12px rgba(180,77,255,0.3); }
+
+        /* ---- 粒子层 ---- */
+        .particles-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        .particle {
+            position: absolute; width: 5px; height: 5px; border-radius: 50%;
+            animation: burst 0.75s ease-out forwards;
+        }
+        @keyframes burst {
+            0%   { transform: translate(0,0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+        }
+
+        /* ============================================================
+           侧边栏
+           ============================================================ */
+        .side-panel { display: flex; flex-direction: column; gap: 18px; min-width: 210px; }
+
+        .card {
+            background: var(--panel-bg); border-radius: 18px; padding: 20px;
+            border: 1px solid var(--border);
+            box-shadow: 0 0 35px rgba(90,90,180,0.06), inset 0 1px 0 rgba(255,255,255,0.02);
+            backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+            text-align: center;
+        }
+        .card-label {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 3px;
+            color: var(--text-dim); margin-bottom: 6px;
+        }
+        .card-value {
+            font-size: 34px; font-weight: 900;
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .card-value.score { background-image: linear-gradient(180deg, var(--gold) 0%, #ff6d00 100%); }
+        .card-value.level { background-image: linear-gradient(180deg, var(--cyan) 0%, #0078b0 100%); }
+        .card-value.lines { background-image: linear-gradient(180deg, #fff 0%, #aab 100%); }
+
+        canvas#nextCanvas { display: block; margin: 8px auto 0; image-rendering: crisp-edges; }
+
+        /* 操作说明 */
+        .key-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 13px; color: #999; }
+        .kbd {
+            display: inline-block;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 6px; padding: 3px 9px;
+            font-size: 11px; font-weight: 600; color: #bbb;
+            font-family: 'Consolas', 'Monaco', monospace;
+            min-width: 26px; text-align: center;
+        }
+        .kbd.wide { min-width: 70px; }
+
+        /* ============================================================
+           响应式
+           ============================================================ */
+        @media (max-width: 768px) {
+            .game-wrapper { flex-direction: column; align-items: center; gap: 14px; }
+            .side-panel { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 12px; min-width: auto; }
+            .card { padding: 12px 16px; }
+            .card-value { font-size: 26px; }
+            .controls-card { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 背景星星 -->
+    <div class="stars" id="stars"></div>
+
+    <!-- 主布局 -->
+    <div class="game-wrapper">
+
+        <!-- ======== 游戏操作区 ======== -->
+        <div class="board-outer">
+            <div class="board-inner" id="boardInner">
+                <canvas id="gameCanvas"></canvas>
+                <div class="particles-layer" id="particlesLayer"></div>
+                <div class="overlay" id="overlay">
+                    <div class="overlay-title">GAME OVER</div>
+                    <div class="overlay-score">最终得分 <span id="finalScore">0</span></div>
+                    <button class="btn-restart" id="btnRestart">再来一局</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======== 侧边栏 ======== -->
+        <div class="side-panel">
+            <div class="card">
+                <div class="card-label">得分</div>
+                <div class="card-value score" id="scoreDisplay">0</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">等级</div>
+                <div class="card-value level" id="levelDisplay">1</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">消除行数</div>
+                <div class="card-value lines" id="linesDisplay">0</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">下一块</div>
+                <canvas id="nextCanvas" width="120" height="100"></canvas>
+            </div>
+
+            <div class="card controls-card">
+                <div class="card-label">操作</div>
+                <div class="key-row"><span class="kbd">←</span><span class="kbd">→</span> 左右移动</div>
+                <div class="key-row"><span class="kbd">↓</span> 加速下落</div>
+                <div class="key-row"><span class="kbd">↑</span> 旋转方块</div>
+                <div class="key-row"><span class="kbd wide">Space</span> 硬降</div>
+                <div class="key-row"><span class="kbd">P</span> 暂停 / 继续</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // 常量
+        // ============================================================
+        const COLS = 10;
+        const ROWS = 20;
+        const CELL = 30;
+        const BW = COLS * CELL;   // 画布宽度
+        const BH = ROWS * CELL;   // 画布高度
+
+        const API = '';           // 同域 API
+
+        // ---- DOM ----
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = BW;
+        canvas.height = BH;
+
+        const nextCanvas = document.getElementById('nextCanvas');
+        const nextCtx = nextCanvas.getContext('2d');
+
+        const particlesLayer = document.getElementById('particlesLayer');
+        const overlay = document.getElementById('overlay');
+        const scoreEl = document.getElementById('scoreDisplay');
+        const levelEl = document.getElementById('levelDisplay');
+        const linesEl = document.getElementById('linesDisplay');
+        const finalScoreEl = document.getElementById('finalScore');
+        const btnRestart = document.getElementById('btnRestart');
+
+        // ---- 游戏状态 ----
+        let state = null;
+        let paused = false;
+        let lastTick = 0;
+        let baseInterval = 800;
+        let prevLines = 0;
+        let animId = null;
+
+        // ============================================================
+        // 背景星星
+        // ============================================================
+        (function createStars() {
+            const container = document.getElementById('stars');
+            for (let i = 0; i < 140; i++) {
+                const s = document.createElement('div');
+                s.classList.add('star');
+                const size = Math.random() * 2.5 + 1;
+                s.style.width = size + 'px';
+                s.style.height = size + 'px';
+                s.style.left = Math.random() * 100 + '%';
+                s.style.top = Math.random() * 100 + '%';
+                s.style.setProperty('--d', (Math.random() * 3 + 2) + 's');
+                s.style.setProperty('--delay', Math.random() * 5 + 's');
+                container.appendChild(s);
+            }
+        })();
+
+        // ============================================================
+        // API
+        // ============================================================
+        async function call(endpoint, method = 'GET', body) {
+            const opts = { method, headers: { 'Content-Type': 'application/json' } };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(API + endpoint, opts);
+            return res.json();
+        }
+
+        async function newGame() {
+            state = await call('/api/new_game', 'POST');
+            prevLines = state.lines;
+            refresh();
+            overlay.classList.remove('active');
+            paused = false;
+            lastTick = performance.now();
+            startLoop();
+        }
+
+        async function domove(dir) {
+            if (!state || state.gameOver || paused) return;
+            state = await call('/api/move', 'POST', { direction: dir });
+            refresh();
+        }
+
+        async function dorotate() {
+            if (!state || state.gameOver || paused) return;
+            state = await call('/api/rotate', 'POST');
+            refresh();
+        }
+
+        async function dohard() {
+            if (!state || state.gameOver || paused) return;
+            state = await call('/api/hard_drop', 'POST');
+            checkClear();
+            refresh();
+        }
+
+        async function dotick() {
+            if (!state || state.gameOver || paused) return;
+            state = await call('/api/tick', 'POST');
+            checkClear();
+            refresh();
+        }
+
+        // ============================================================
+        // 消行粒子
+        // ============================================================
+        function checkClear() {
+            if (!state) return;
+            const now = state.lines;
+            if (now > prevLines) spawnParticles(now - prevLines);
+            prevLines = now;
+        }
+
+        function spawnParticles(rows) {
+            const layer = particlesLayer;
+            const lr = layer.getBoundingClientRect();
+            const br = canvas.getBoundingClientRect();
+            const ox = br.left - lr.left;
+            const oy = br.top - lr.top;
+
+            for (let i = 0; i < rows * 35; i++) {
+                const p = document.createElement('div');
+                p.classList.add('particle');
+                p.style.left = (ox + Math.random() * BW) + 'px';
+                p.style.top  = (oy + (ROWS - rows) * CELL + Math.random() * rows * CELL) + 'px';
+                p.style.background = `hsl(${Math.random()*360}, 85%, 65%)`;
+                p.style.setProperty('--tx', (Math.random() - 0.5) * 220 + 'px');
+                p.style.setProperty('--ty', (Math.random() * -140 - 20) + 'px');
+                p.style.animationDuration = (Math.random() * 0.5 + 0.4) + 's';
+                layer.appendChild(p);
+                setTimeout(() => p.remove(), 800);
+            }
+        }
+
+        // ============================================================
+        // 渲染
+        // ============================================================
+        function drawBoard() {
+            ctx.clearRect(0, 0, BW, BH);
+
+            // 底色
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(0, 0, BW, BH);
+
+            // 网格
+            ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+            ctx.lineWidth = 0.5;
+            for (let r = 0; r <= ROWS; r++) { ctx.beginPath(); ctx.moveTo(0,r*CELL); ctx.lineTo(BW,r*CELL); ctx.stroke(); }
+            for (let c = 0; c <= COLS; c++) { ctx.beginPath(); ctx.moveTo(c*CELL,0); ctx.lineTo(c*CELL,BH); ctx.stroke(); }
+
+            if (!state || !state.board) return;
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const v = state.board[r][c];
+                    if (!v) continue;
+                    if (v === 'ghost') drawGhost(r, c);
+                    else drawCell(r, c, v, 1);
+                }
+            }
+        }
+
+        function drawCell(r, c, color, alpha) {
+            const x = c * CELL, y = r * CELL, p = 1;
+            ctx.globalAlpha = alpha;
+
+            // 主体渐变
+            const g = ctx.createLinearGradient(x, y, x + CELL, y + CELL);
+            g.addColorStop(0, color);
+            g.addColorStop(1, shade(color, -32));
+            ctx.fillStyle = g;
+            ctx.fillRect(x + p, y + p, CELL - p*2, CELL - p*2);
+
+            // 高光 (左上)
+            ctx.fillStyle = 'rgba(255,255,255,0.22)';
+            ctx.fillRect(x + p, y + p, CELL - p*2, 3);
+            ctx.fillRect(x + p, y + p, 3, CELL - p*2);
+
+            // 阴影 (右下)
+            ctx.fillStyle = 'rgba(0,0,0,0.28)';
+            ctx.fillRect(x + p, y + CELL - p - 3, CELL - p*2, 3);
+            ctx.fillRect(x + CELL - p - 3, y + p, 3, CELL - p*2);
+
+            ctx.globalAlpha = 1;
+        }
+
+        function drawGhost(r, c) {
+            const x = c * CELL, y = r * CELL, p = 3;
+            ctx.globalAlpha = 0.28;
+            ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(x + p, y + p, CELL - p*2, CELL - p*2);
+            ctx.setLineDash([]);
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 1;
+        }
+
+        function drawNext() {
+            const w = nextCanvas.width, h = nextCanvas.height;
+            nextCtx.clearRect(0, 0, w, h);
+            if (!state || !state.nextPiece) return;
+
+            const { color, cells } = state.nextPiece;
+            const pc = 24;
+            const minR = Math.min(...cells.map(c => c[0]));
+            const maxR = Math.max(...cells.map(c => c[0]));
+            const minC = Math.min(...cells.map(c => c[1]));
+            const maxC = Math.max(...cells.map(c => c[1]));
+            const ox = (w - (maxC - minC + 1) * pc) / 2 - minC * pc;
+            const oy = (h - (maxR - minR + 1) * pc) / 2 - minR * pc;
+
+            for (const [r, c] of cells) {
+                const x = c * pc + ox, y = r * pc + oy, p = 1;
+                const g = nextCtx.createLinearGradient(x, y, x + pc, y + pc);
+                g.addColorStop(0, color);
+                g.addColorStop(1, shade(color, -30));
+                nextCtx.fillStyle = g;
+                nextCtx.fillRect(x + p, y + p, pc - p*2, pc - p*2);
+                nextCtx.fillStyle = 'rgba(255,255,255,0.22)';
+                nextCtx.fillRect(x + p, y + p, pc - p*2, 2);
+                nextCtx.fillRect(x + p, y + p, 2, pc - p*2);
+                nextCtx.fillStyle = 'rgba(0,0,0,0.28)';
+                nextCtx.fillRect(x + p, y + pc - p - 2, pc - p*2, 2);
+                nextCtx.fillRect(x + pc - p - 2, y + p, 2, pc - p*2);
+            }
+        }
+
+        function refresh() {
+            drawBoard();
+            drawNext();
+            if (state) {
+                scoreEl.textContent = state.score.toLocaleString();
+                levelEl.textContent = state.level;
+                linesEl.textContent = state.lines;
+                if (state.gameOver) {
+                    finalScoreEl.textContent = state.score.toLocaleString();
+                    overlay.classList.add('active');
+                    stopLoop();
+                }
+            }
+        }
+
+        // ============================================================
+        // 工具
+        // ============================================================
+        function shade(hex, pct) {
+            const n = parseInt(hex.replace('#', ''), 16);
+            const a = Math.round(2.55 * pct);
+            const R = Math.min(255, Math.max(0, (n >> 16) + a));
+            const G = Math.min(255, Math.max(0, ((n >> 8) & 0xff) + a));
+            const B = Math.min(255, Math.max(0, (n & 0xff) + a));
+            return `rgb(${R},${G},${B})`;
+        }
+
+        // ============================================================
+        // 游戏循环
+        // ============================================================
+        function startLoop() {
+            stopLoop();
+            animId = requestAnimationFrame(loop);
+        }
+
+        function stopLoop() {
+            if (animId) { cancelAnimationFrame(animId); animId = null; }
+        }
+
+        function loop(ts) {
+            if (!state || state.gameOver || paused) {
+                animId = requestAnimationFrame(loop);
+                return;
+            }
+            const interval = Math.max(50, baseInterval - (state.level - 1) * 50);
+            if (ts - lastTick >= interval) {
+                dotick();
+                lastTick = ts;
+            }
+            animId = requestAnimationFrame(loop);
+        }
+
+        // ============================================================
+        // 键盘
+        // ============================================================
+        document.addEventListener('keydown', e => {
+            if (!state) return;
+            if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+
+            if (e.key === 'p' || e.key === 'P') {
+                paused = !paused;
+                if (!paused) lastTick = performance.now();
+                return;
+            }
+            if (state.gameOver || paused) return;
+
+            switch (e.key) {
+                case 'ArrowLeft':  domove('left');  break;
+                case 'ArrowRight': domove('right'); break;
+                case 'ArrowDown':  domove('down');  break;
+                case 'ArrowUp':    dorotate();      break;
+                case ' ':          dohard();        break;
+            }
+        });
+
+        btnRestart.addEventListener('click', newGame);
+
+        // ============================================================
+        // 启动!
+        // ============================================================
+        newGame();
+    </script>
+</body>
+</html>
