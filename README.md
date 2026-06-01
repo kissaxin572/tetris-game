@@ -67,7 +67,8 @@ tetris-game/
 ├── templates/
 │   └── index.html         # 前端 HTML/CSS/JS
 ├── .gitignore
-└── README.md
+├── README.md
+└── GIT_GUIDE.md           # Git 使用教程
 ```
 
 ---
@@ -107,6 +108,12 @@ tetris-game/
 | 4 (Tetris)    | 800 |
 
 最终得分 = 基础分 × 当前等级
+
+---
+
+## 📖 Git 教程
+
+本项目附带 [**Git 使用教程**](GIT_GUIDE.md) — 从入门到进阶，涵盖核心概念、分支管理、远程协作、撤销回退、工作流程等。
 
 ---
 
